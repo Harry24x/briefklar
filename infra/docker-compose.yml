@@ -1,0 +1,46 @@
+# Local development: PostgreSQL + pgvector and the FastAPI backend.
+# Run from the repo root:
+#   docker compose --env-file .env -f infra/docker-compose.yml up -d db        (database only)
+#   docker compose --env-file .env -f infra/docker-compose.yml up -d --build   (db + backend)
+
+name: briefklar
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-briefklar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-briefklar}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Creates the tables the first time the volume is empty.
+      - ../backend/app/sql/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-briefklar} -d ${POSTGRES_DB:-briefklar}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ../backend
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-briefklar}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-briefklar}
+      HF_HOME: /models
+    ports:
+      - "8000:8000"
+    volumes:
+      - hf_cache:/models
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  hf_cache:
