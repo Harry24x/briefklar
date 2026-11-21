@@ -1,0 +1,101 @@
+# BriefKlar seed sources (MVP: 3 official sites).
+#
+# How the crawler uses this file:
+#   1. It fetches every seed URL below.
+#   2. It also fetches the page's <link rel="alternate" hreflang="de|en"> twin, if the site has one
+#      (any path on the same site, as long as it is not denied).
+#   3. It follows links on a seed page ONE level deep, but only to URLs that start with one of
+#      the site's `allow` prefixes and do not contain any `deny` pattern.
+#   4. It stops at `max_pages` per site.
+# Run `python -m app.ingest.crawl --list` to print the final URL list without storing anything.
+
+user_agent: "BriefKlarBot/0.1 (student project; +https://github.com/Harry24x/briefklar)"
+delay_seconds: 1.0        # 1 request per second, per the plan
+follow_depth: 1
+
+sites:
+  - name: make-it-in-germany
+    base: https://www.make-it-in-germany.com
+    max_pages: 30
+    allow:
+      - /en/study-vocational-training/studying-in-germany
+      - /en/staying-in-germany-after-studies
+      - /en/visa-recognition/visa-types/studying
+      - /en/visa-recognition/visa-types/other/internship
+      - /en/visa-recognition/opportunity-card/job-search
+      - /en/arriving-living/getting-started
+    deny:
+      - /newsletter/            # old newsletters state outdated rules (e.g. 120 days instead of 140)
+      - /job-listings
+      - /glossary
+      - .pdf
+    seeds:
+      - { url: https://www.make-it-in-germany.com/en/study-vocational-training/studying-in-germany, lang: en, topic: studying }
+      - { url: https://www.make-it-in-germany.com/en/study-vocational-training/studying-in-germany/requirements, lang: en, topic: studying }
+      - { url: https://www.make-it-in-germany.com/en/study-vocational-training/studying-in-germany/planning, lang: en, topic: studying }
+      - { url: https://www.make-it-in-germany.com/en/study-vocational-training/studying-in-germany/work, lang: en, topic: student-work }
+      - { url: https://www.make-it-in-germany.com/en/staying-in-germany-after-studies, lang: en, topic: after-graduation }
+      - { url: https://www.make-it-in-germany.com/en/visa-recognition/visa-types/studying, lang: en, topic: residence-permit }
+      - { url: https://www.make-it-in-germany.com/en/visa-recognition/visa-types/other/internship, lang: en, topic: residence-permit }
+      - { url: https://www.make-it-in-germany.com/en/visa-recognition/apply-for-visa, lang: en, topic: residence-permit }
+      - { url: https://www.make-it-in-germany.com/en/visa-recognition/opportunity-card/job-search, lang: en, topic: after-graduation }
+      - { url: https://www.make-it-in-germany.com/en/arriving-living/getting-started/health-insurance, lang: en, topic: health-insurance }
+      - { url: https://www.make-it-in-germany.com/en/advice-support/faq, lang: en, topic: faq }
+      - { url: https://www.make-it-in-germany.com/de/service/faq, lang: de, topic: faq }
+
+  - name: arbeitsagentur
+    base: https://www.arbeitsagentur.de
+    max_pages: 25
+    allow:
+      - /bildung/studium/
+      - /arbeiten-in-deutschland/
+      - /en/working-in-germany/
+      - /unternehmen/fachkraefte-ausland/praktika-auslaendische-studierende
+      - /unternehmen/fachkraefte-ausland/ferienbeschaeftigung
+      - /unternehmen/arbeitskraefte/auslaendische-studierende-beschaeftigen
+    deny:
+      - /jobsuche
+      - /datei/
+      - /vor-ort/
+    seeds:
+      - { url: https://www.arbeitsagentur.de/bildung/studium/jobben-neben-dem-studium, lang: de, topic: student-work }
+      - { url: https://www.arbeitsagentur.de/bildung/studium/versicherungen-im-studium, lang: de, topic: insurance }
+      - { url: https://www.arbeitsagentur.de/arbeiten-in-deutschland/praktika-und-ferienjobs-fuer-auslaendische-studierende, lang: de, topic: internship }
+      - { url: https://www.arbeitsagentur.de/en/working-in-germany/internships-holiday-jobs-for-students, lang: en, topic: internship }
+      - { url: https://www.arbeitsagentur.de/unternehmen/fachkraefte-ausland/praktika-auslaendische-studierende, lang: de, topic: internship }
+      - { url: https://www.arbeitsagentur.de/unternehmen/fachkraefte-ausland/ferienbeschaeftigung, lang: de, topic: internship }
+      - { url: https://www.arbeitsagentur.de/unternehmen/arbeitskraefte/auslaendische-studierende-beschaeftigen, lang: de, topic: student-work }
+      - { url: https://www.arbeitsagentur.de/arbeiten-in-deutschland/deutschkenntnisse, lang: de, topic: german-language }
+      - { url: https://www.arbeitsagentur.de/en/working-in-germany, lang: en, topic: working }
+      - { url: https://www.arbeitsagentur.de/en/working-in-germany/how-to-find-a-job, lang: en, topic: job-search }
+      - { url: https://www.arbeitsagentur.de/en/working-in-germany/advice-and-support, lang: en, topic: job-search }
+
+  - name: rundfunkbeitrag
+    base: https://www.rundfunkbeitrag.de
+    max_pages: 25
+    allow:
+      - /buergerinnen-und-buerger/informationen/
+      - /welcome/english
+      - /ausnahmen-von-der-rundfunkbeitragspflicht/
+      - /der-rundfunkbeitrag/
+    deny:
+      - /formulare/
+      - /presse-und-aktuelles/presse/pressearchiv
+      - /unternehmen-und-institutionen
+      - .pdf
+    seeds:
+      - { url: https://www.rundfunkbeitrag.de/buergerinnen-und-buerger/informationen/informationen-fuer-studierende, lang: de, topic: rundfunkbeitrag-students }
+      - { url: https://www.rundfunkbeitrag.de/welcome/english, lang: en, topic: rundfunkbeitrag }
+      - { url: https://www.rundfunkbeitrag.de/ausnahmen-von-der-rundfunkbeitragspflicht/haeufige-fragen-zum-thema-befreiung-und-ermaessigung, lang: de, topic: rundfunkbeitrag-exemption }
+      - { url: https://www.rundfunkbeitrag.de/buergerinnen-und-buerger/informationen/empfaenger-von-sozialleistungen, lang: de, topic: rundfunkbeitrag-exemption }
+      - { url: https://www.rundfunkbeitrag.de/presse-und-aktuelles/servicethemen/befreiung-ermaessigung, lang: de, topic: rundfunkbeitrag-exemption }
+      - { url: https://www.rundfunkbeitrag.de/presse-und-aktuelles/presse/neues-semester-neue-wohnung-das-wichtigste-zum-rundfunkbeitrag-fuer-studierende-und-auszubildende, lang: de, topic: rundfunkbeitrag-students }
+      - { url: https://www.rundfunkbeitrag.de/buergerinnen-und-buerger/informationen/zahlung, lang: de, topic: rundfunkbeitrag-payment }
+      - { url: https://www.rundfunkbeitrag.de/vollstreckung/verrechnung-der-zahlung, lang: de, topic: rundfunkbeitrag-payment }
+      - { url: https://www.rundfunkbeitrag.de/klaerung, lang: de, topic: rundfunkbeitrag-letters }
+      - { url: https://www.rundfunkbeitrag.de/meldedaten, lang: de, topic: rundfunkbeitrag-letters }
+      - { url: https://www.rundfunkbeitrag.de/widerspruch, lang: de, topic: rundfunkbeitrag-letters }
+      - { url: https://www.rundfunkbeitrag.de/presse-und-aktuelles/hinweise/betruegerische-schreiben, lang: de, topic: scam-letters }
+      - { url: https://www.rundfunkbeitrag.de/presse-und-aktuelles/hinweise/beitragsanpassung, lang: de, topic: rundfunkbeitrag }
+      - { url: https://www.rundfunkbeitrag.de/der-rundfunkbeitrag/solidarmodell, lang: de, topic: rundfunkbeitrag }
+      - { url: https://www.rundfunkbeitrag.de/nutzungshinweise/glossar, lang: de, topic: rundfunkbeitrag }
