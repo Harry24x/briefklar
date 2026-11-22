@@ -18,7 +18,10 @@ INIT_SQL = Path(__file__).parent / "sql" / "init.sql"
 
 @lru_cache
 def get_engine() -> Engine:
-    return create_engine(get_settings().database_url, pool_pre_ping=True)
+    # connect_timeout: fail fast with an error instead of hanging when the DB is not running
+    return create_engine(
+        get_settings().database_url, pool_pre_ping=True, connect_args={"connect_timeout": 5}
+    )
 
 
 def get_session() -> Iterator[Session]:

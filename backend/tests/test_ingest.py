@@ -73,8 +73,49 @@ def test_parse_page_extracts_text_links_and_twin() -> None:
     <p><a href="https://a.de/studium/minijob">Minijob</a></p></article></main></body></html>"""
     page = parse_page(html, "https://a.de/studium/jobben", seed_lang=None, topic="work")
     assert page is not None
-    assert page.lang == "de"
+    assert page.lang == "en"  # detected from the (English) text, not <html lang="de">
     assert page.title == "Jobben im Studium"
     assert "part-time" in page.text
     assert "https://a.de/en/jobs" in page.alternates
     assert "https://a.de/studium/minijob" in page.links
+
+
+def test_link_text_is_kept_when_nested_in_spans() -> None:
+    body = " ".join(["Students can find part-time work in many cities across Germany."] * 8)
+    html = f"""<html><body><main><article><h1>Jobs</h1><p>{body}</p>
+    <p>You can also apply for a <a href="/funding"><!----><span class="x">scholarship
+    (Stipendium)</span></a>, for example, instead of a job.</p></article></main></body></html>"""
+    page = parse_page(html, "https://a.de/jobs", seed_lang="en", topic=None)
+    assert page is not None
+    assert "apply for a scholarship (Stipendium), for example" in " ".join(page.text.split())
+
+
+def test_nuxt_panels_are_extracted_with_their_titles() -> None:
+    body = " ".join(["International students should know the rules for part-time jobs."] * 8)
+    panel = r"<p>Students from everywhere else may work 140 full days a year.</p>"
+    html = f"""<html><body><main><article><h1>Work</h1><p>{body}</p></article></main>
+    <script>window.__NUXT__=(function(a,b){{return {{items:[{{headline:b,offcanvas:
+    {{headline:b,introHtml:"{panel}"}}}}]}}}}("x","And everyone else?"));</script></body></html>"""
+    page = parse_page(html, "https://a.de/work", seed_lang="en", topic=None)
+    assert page is not None
+    assert "And everyone else?: Students from everywhere else may work 140 full days" in page.text
+
+
+def test_glossary_popups_removed_and_inline_terms_kept() -> None:
+    body = " ".join(
+        ["Der Beitragsservice gleicht die Daten regelmäßig mit den Meldeämtern ab."] * 8
+    )
+    html = f"""<html><body><header><nav><a href="/">Menü</a></nav></header>
+    <main><article><header><h2>Meldedaten</h2></header><p>{body}</p>
+    <p>Ihre Daten konnten keiner angemeldeten <button data-glossary-id="w">Wohnung</button>
+    zugeordnet werden. Melde­ämter sind informiert.</p></article></main>
+    <div class="glossary"><div class="glossary_popover"><p>Wohnung Schließen Eine Wohnung ist
+    eine ortsfeste, baulich abgeschlossene Einheit.</p></div></div></body></html>"""
+    page = parse_page(html, "https://rb.de/meldedaten", seed_lang="de", topic=None)
+    assert page is not None
+    text = " ".join(page.text.split())
+    assert "angemeldeten Wohnung zugeordnet" in text  # inline <button> kept as text
+    assert "Meldeämter sind informiert" in text  # soft hyphen removed
+    assert "Schließen" not in text and "baulich abgeschlossene" not in text  # pop-up removed
+    assert "Menü" not in text  # navigation removed
+    assert "## Meldedaten" in page.text  # in-article <header> heading kept

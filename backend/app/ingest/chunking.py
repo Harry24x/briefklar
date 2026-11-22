@@ -32,6 +32,8 @@ class TextChunk:
 def clean_text(markdown: str) -> str:
     """Normalise whitespace and drop obvious navigation lines."""
     lines: list[str] = []
+    # Soft hyphens (U+00AD) are invisible but split words: "Melde\u00adämter" != "Meldeämter".
+    markdown = markdown.replace("\u00ad", "")
     for raw in markdown.replace("\r\n", "\n").split("\n"):
         line = re.sub(r"[ \t ]+", " ", raw).strip()
         if BOILERPLATE_RE.match(line):

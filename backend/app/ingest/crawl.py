@@ -12,6 +12,8 @@ Re-running is safe: a page whose cleaned text has the same hash as last time is 
 """
 
 import argparse
+import json
+import re
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -172,9 +174,139 @@ class Page:
     alternates: list[str] = field(default_factory=list)
 
 
+# Pages built with Nuxt/Vue (study-in-germany.com) keep pop-up panel content ("offcanvas")
+# in an inline JavaScript state object instead of the HTML. Example: the EU / non-EU working
+# rules. We read those escaped HTML strings so this content is not lost. Panel titles are
+# often variables (headline:al), so we also map Nuxt's function parameters to their values.
+_JS_STR = r'"(?:[^"\\]|\\.)*"'
+PANEL_RE = re.compile(
+    rf"(?:headline:(\w+|{_JS_STR}),\s*offcanvas:\s*\{{\s*headline:[^,]+,\s*)?introHtml:({_JS_STR})"
+)
+
+
+def _js_args(src: str) -> list[str | None]:
+    """Parse a comma-separated list of JS literals; only strings are kept."""
+    out: list[str | None] = []
+    i = 0
+    while i < len(src):
+        ch = src[i]
+        if ch in " ,\n":
+            i += 1
+        elif ch == '"':
+            m = re.match(_JS_STR, src[i:])
+            if not m:
+                break
+            try:
+                out.append(json.loads(m.group(0)))
+            except json.JSONDecodeError:
+                out.append(None)
+            i += m.end()
+        elif ch in "[{":  # skip nested objects/arrays by bracket depth
+            depth, j = 0, i
+            while j < len(src):
+                depth += src[j] in "[{"
+                depth -= src[j] in "]}"
+                j += 1
+                if depth == 0:
+                    break
+            out.append(None)
+            i = j
+        else:  # number, true/false/null, void 0
+            m = re.match(r"[^,]+", src[i:])
+            out.append(None)
+            i += m.end() if m else 1
+    return out
+
+
+def nuxt_variables(html: str) -> dict[str, str]:
+    start = html.find("__NUXT__=(function(")
+    if start < 0:
+        return {}
+    end = html.find("</script>", start)
+    blob = html[start:end]
+    params = blob[len("__NUXT__=(function(") : blob.find(")")].split(",")
+    call = blob.rfind("}(")
+    if call < 0:
+        return {}
+    args = _js_args(blob[call + 2 :].rstrip(";) \n"))
+    return {p: a for p, a in zip(params, args, strict=False) if isinstance(a, str)}
+
+
+# Removed before extraction:
+# - page chrome: <nav>, <footer>, and <header> blocks that contain a menu (arbeitsagentur.de
+#   also uses <header> inside articles for section titles, so a plain //header would be wrong)
+# - glossary/tooltip pop-ups (rundfunkbeitrag.de): copied into every page, they would put the
+#   same definitions into dozens of chunks and push real answers out of the top 5
+REMOVE_XPATH = (
+    "//nav | //footer | //header[.//nav]"
+    " | //*[contains(@class, 'glossary_popover') or contains(@class, 'tooltip')]"
+)
+# Unwrapped (tag removed, text kept): trafilatura drops link text nested in <span>s and drops
+# <button>s, but rundfunkbeitrag.de writes glossary words as inline buttons:
+#   "...angemeldeten <button data-glossary-id="wohnung">Wohnung</button> zugeordnet..."
+UNWRAP_XPATH = "//body//a | //p//button | //li//button | //td//button"
+
+
+def prepare_html(html: str) -> str:
+    """Clean the HTML before trafilatura extracts the main text."""
+    tree = lxml.html.fromstring(html)
+    for el in tree.xpath(REMOVE_XPATH):
+        el.drop_tree()
+    for el in tree.xpath(UNWRAP_XPATH):
+        el.drop_tag()
+    return lxml.html.tostring(tree, encoding="unicode")
+
+
+SKIP_INSIDE = {"script", "style", "noscript", "form", "button", "template", "svg"}
+
+
+def structural_markdown(clean_html: str) -> str:
+    """Fallback extractor: headings, paragraphs and list items of the page, in order.
+
+    trafilatura looks for ONE main article. FAQ pages built from many separate content blocks
+    (rundfunkbeitrag.de: one block per question) defeat that heuristic and only one answer is
+    kept. This walk keeps every block. It runs on HTML that prepare_html() already cleaned.
+    """
+    tree = lxml.html.fromstring(clean_html)
+    lines: list[str] = []
+    for el in tree.iter("h1", "h2", "h3", "h4", "p", "li"):
+        if any(a.tag in SKIP_INSIDE or a.get("aria-hidden") == "true" for a in el.iterancestors()):
+            continue
+        if el.tag == "p" and any(a.tag == "li" for a in el.iterancestors()):
+            continue  # the <li> already contains this paragraph
+        text = " ".join(el.text_content().split())
+        if not text:
+            continue
+        if el.tag.startswith("h"):
+            lines.append(f"\n{'#' * int(el.tag[1])} {text}\n")
+        elif el.tag == "li":
+            lines.append(f"- {text}")
+        else:
+            lines.append(f"{text}\n")
+    return "\n".join(lines)
+
+
+def embedded_html_text(html: str) -> list[str]:
+    """Return "Title: text" for each pop-up panel stored in the inline Nuxt state."""
+    variables = nuxt_variables(html)
+    texts: list[str] = []
+    for head, body in PANEL_RE.findall(html):
+        try:
+            snippet = json.loads(body)  # undo JS escapes like \u003C
+            title = json.loads(head) if head.startswith('"') else variables.get(head, "")
+        except json.JSONDecodeError:
+            continue
+        text = " ".join(lxml.html.fromstring(f"<div>{snippet}</div>").text_content().split())
+        if len(text.split()) < 5 or text in texts:
+            continue
+        texts.append(f"{title.strip()}: {text}" if title.strip() else text)
+    return texts
+
+
 def parse_page(html: str, url: str, seed_lang: str | None, topic: str | None) -> Page | None:
+    cleaned = prepare_html(html)
     extracted = trafilatura.extract(
-        html,
+        cleaned,
         url=url,
         output_format="markdown",
         include_tables=True,
@@ -184,9 +316,16 @@ def parse_page(html: str, url: str, seed_lang: str | None, topic: str | None) ->
         include_formatting=True,  # needed to keep headings as "#" lines
         favor_precision=False,  # precision mode drops most h2/h3 headings on these sites
     )
-    if not extracted:
+    fallback = structural_markdown(cleaned)
+    # Use the fallback when trafilatura kept less than half of the page's real text.
+    if not extracted or len(extracted.split()) < 0.5 * len(fallback.split()):
+        extracted = fallback
+    if not extracted.strip():
         return None
     text = clean_text(extracted)
+    extra = [t for t in embedded_html_text(html) if t[:80] not in text]
+    if extra:
+        text += "\n\n## More details\n" + "\n\n".join(extra)
     if len(text.split()) < MIN_PAGE_WORDS:
         return None
 
@@ -202,8 +341,8 @@ def parse_page(html: str, url: str, seed_lang: str | None, topic: str | None) ->
             for h in tree.xpath("//link[@rel='alternate'][@hreflang='de' or @hreflang='en']/@href")
         }
     )
-    html_lang = (tree.get("lang") or "")[:2].lower() or None
-    lang = seed_lang or html_lang or detect_lang(text)
+    # Text detection, not <html lang>: rundfunkbeitrag.de marks its English pages as lang="de".
+    lang = seed_lang or detect_lang(text)
     return Page(url, title, lang, text, topic, links, alternates)
 
 
@@ -278,7 +417,7 @@ def crawl_site(site: Site, fetcher: PoliteFetcher, depth: int, limit: int | None
 def store_pages(pages: list[Page]) -> Counter[str]:
     """Upsert pages. Unchanged pages (same hash) are skipped; changed pages get new chunks."""
     # Imported here so `--list` works without a database or the ML extras.
-    from sqlalchemy import delete, select
+    from sqlalchemy import delete, select, update
     from sqlalchemy.orm import Session
 
     from app.db import get_engine, init_db
@@ -292,6 +431,13 @@ def store_pages(pages: list[Page]) -> Counter[str]:
             digest = content_hash(page.text)
             source = session.scalar(select(Source).where(Source.url == page.url))
             if source and source.content_hash == digest:
+                if source.lang != page.lang:  # metadata fix without re-embedding
+                    source.lang = page.lang
+                    session.execute(
+                        update(Chunk).where(Chunk.source_id == source.id).values(lang=page.lang)
+                    )
+                    session.commit()
+                    result["lang_fixed"] += 1
                 result["unchanged"] += 1
                 continue
 
@@ -328,6 +474,32 @@ def store_pages(pages: list[Page]) -> Counter[str]:
     return result
 
 
+def prune_stale(pages: list[Page]) -> int:
+    """Delete stored pages that this full crawl no longer produced (e.g. newly denied URLs).
+
+    Only hosts that returned at least one page are pruned, so a temporary network problem
+    on one site never wipes that site's data.
+    """
+    from sqlalchemy import delete, select
+    from sqlalchemy.orm import Session
+
+    from app.db import get_engine
+    from app.models import Source
+
+    kept = {p.url for p in pages}
+    hosts = {urlparse(u).netloc for u in kept}
+    with Session(get_engine()) as session:
+        stale = [
+            s.id
+            for s in session.scalars(select(Source))
+            if urlparse(s.url).netloc in hosts and s.url not in kept
+        ]
+        if stale:
+            session.execute(delete(Source).where(Source.id.in_(stale)))  # chunks cascade
+            session.commit()
+    return len(stale)
+
+
 # ---------------------------------------------------------------- CLI ---
 
 
@@ -357,6 +529,8 @@ def main() -> None:
         return
 
     result = store_pages(all_pages)
+    if not args.site and not args.limit:  # only a full crawl knows what should exist
+        result["pruned"] = prune_stale(all_pages)
     print(f"\nDone. {dict(result)}")
 
 

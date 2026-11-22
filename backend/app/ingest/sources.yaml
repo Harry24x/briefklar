@@ -14,34 +14,35 @@ delay_seconds: 1.0        # 1 request per second, per the plan
 follow_depth: 1
 
 sites:
-  - name: make-it-in-germany
-    base: https://www.make-it-in-germany.com
+  # make-it-in-germany.com was the first choice, but its Radware bot protection blocks every
+  # automated request (22.11.2026: 12/12 pages BLOCKED). We respect that instead of bypassing it.
+  - name: study-in-germany
+    base: https://www.study-in-germany.com
     max_pages: 30
     allow:
-      - /en/study-vocational-training/studying-in-germany
-      - /en/staying-in-germany-after-studies
-      - /en/visa-recognition/visa-types/studying
-      - /en/visa-recognition/visa-types/other/internship
-      - /en/visa-recognition/opportunity-card/job-search
-      - /en/arriving-living/getting-started
+      - /en/plan-your-studies/requirements/
+      - /en/plan-your-studies/preparation/
+      - /en/plan-your-studies/plan-your-stay/
+      - /en/germany/everyday-life/
+      - /en/germany/career/after-university
     deny:
-      - /newsletter/            # old newsletters state outdated rules (e.g. 120 days instead of 140)
-      - /job-listings
-      - /glossary
+      - /community/             # student blog posts, not official information
+      - /student-hall
+      - /higher-education-compass
+      - hec-fetch-offset        # disallowed in robots.txt
       - .pdf
     seeds:
-      - { url: https://www.make-it-in-germany.com/en/study-vocational-training/studying-in-germany, lang: en, topic: studying }
-      - { url: https://www.make-it-in-germany.com/en/study-vocational-training/studying-in-germany/requirements, lang: en, topic: studying }
-      - { url: https://www.make-it-in-germany.com/en/study-vocational-training/studying-in-germany/planning, lang: en, topic: studying }
-      - { url: https://www.make-it-in-germany.com/en/study-vocational-training/studying-in-germany/work, lang: en, topic: student-work }
-      - { url: https://www.make-it-in-germany.com/en/staying-in-germany-after-studies, lang: en, topic: after-graduation }
-      - { url: https://www.make-it-in-germany.com/en/visa-recognition/visa-types/studying, lang: en, topic: residence-permit }
-      - { url: https://www.make-it-in-germany.com/en/visa-recognition/visa-types/other/internship, lang: en, topic: residence-permit }
-      - { url: https://www.make-it-in-germany.com/en/visa-recognition/apply-for-visa, lang: en, topic: residence-permit }
-      - { url: https://www.make-it-in-germany.com/en/visa-recognition/opportunity-card/job-search, lang: en, topic: after-graduation }
-      - { url: https://www.make-it-in-germany.com/en/arriving-living/getting-started/health-insurance, lang: en, topic: health-insurance }
-      - { url: https://www.make-it-in-germany.com/en/advice-support/faq, lang: en, topic: faq }
-      - { url: https://www.make-it-in-germany.com/de/service/faq, lang: de, topic: faq }
+      - { url: https://www.study-in-germany.com/en/germany/everyday-life/work, lang: en, topic: student-work }
+      - { url: https://www.study-in-germany.com/en/plan-your-studies/requirements/visa, lang: en, topic: residence-permit }
+      - { url: https://www.study-in-germany.com/en/plan-your-studies/requirements/proof-of-financing, lang: en, topic: residence-permit }
+      - { url: https://www.study-in-germany.com/de/studium-planen/voraussetzungen/finanzierungsnachweis, lang: de, topic: residence-permit }
+      - { url: https://www.study-in-germany.com/en/plan-your-studies/requirements/health-insurance, lang: en, topic: health-insurance }
+      - { url: https://www.study-in-germany.com/en/plan-your-studies/requirements/language-skills, lang: en, topic: german-language }
+      - { url: https://www.study-in-germany.com/en/plan-your-studies/preparation/enrolment, lang: en, topic: studying }
+      - { url: https://www.study-in-germany.com/en/plan-your-studies/preparation/funding, lang: en, topic: studying }
+      - { url: https://www.study-in-germany.com/en/plan-your-studies/preparation/accommodation, lang: en, topic: studying }
+      - { url: https://www.study-in-germany.com/en/plan-your-studies/plan-your-stay/types-of-stay, lang: en, topic: residence-permit }
+      - { url: https://www.study-in-germany.com/en/germany/career/after-university, lang: en, topic: after-graduation }
 
   - name: arbeitsagentur
     base: https://www.arbeitsagentur.de
@@ -82,6 +83,10 @@ sites:
       - /formulare/
       - /presse-und-aktuelles/presse/pressearchiv
       - /unternehmen-und-institutionen
+      - /ausschreibungen          # tenders, senders, brochures: off-topic for students
+      - /senderfamilie
+      - /infomaterialien
+      - /einrichtungen-des-gemeinwohls
       - .pdf
     seeds:
       - { url: https://www.rundfunkbeitrag.de/buergerinnen-und-buerger/informationen/informationen-fuer-studierende, lang: de, topic: rundfunkbeitrag-students }
