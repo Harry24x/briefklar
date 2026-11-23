@@ -18,10 +18,11 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <header className="border-b border-slate-200 bg-white">
           <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
             <Link href="/" className="flex items-center gap-2 font-semibold text-slate-900">
-              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-blue-700 text-sm text-white">
-                B
+              {/* eslint-disable-next-line @next/next/no-img-element -- tiny static SVG */}
+              <img src="/logo.svg" alt="" width={28} height={28} className="h-7 w-7" />
+              <span>
+                Brief<span className="text-blue-700">Klar</span>
               </span>
-              BriefKlar
             </Link>
             <span className="text-sm text-slate-500">Official sources · simple English</span>
           </div>
