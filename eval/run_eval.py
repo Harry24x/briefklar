@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import get_engine
 from app.ingest.crawl import normalize_url
-from app.llm import LLMError, chat_json
+from app.llm import LLMError, chat_json, record_prompts
 from app.rag.pipeline import ask
 from app.rag.retrieve import MODES, retrieve
 
@@ -91,6 +91,12 @@ def with_retry(fn, *args, tries: int = 3, wait: float = 30.0):
         try:
             return fn(*args)
         except LLMError as exc:
+            if "tokens per day" in str(exc):
+                # Waiting 30 s does not help with the daily limit; stop cleanly instead.
+                raise SystemExit(
+                    "Groq's daily token limit is used up. Nothing was saved. "
+                    "Run the eval again tomorrow (the limit resets every 24 h)."
+                ) from exc
             if attempt == tries - 1:
                 raise
             print(f"    rate limited / error, waiting {wait:.0f}s ({exc})")
@@ -270,6 +276,111 @@ def rejudge(path: Path, args: argparse.Namespace) -> dict:
     return old
 
 
+# ---------------------------------------------------------------- letters ---
+
+LETTER_FIELDS = ("sender", "letter_date", "deadline", "amount_eur")
+
+
+def field_correct(name: str, predicted: object, expected: object) -> bool:
+    if name == "sender":  # free text: enough if most words of the expected sender appear
+        if not predicted or not expected:
+            return predicted == expected
+        want = set(str(expected).lower().replace("–", " ").split())
+        got = set(str(predicted).lower().replace("–", " ").split())
+        return len(want & got) / len(want) >= 0.5
+    if name == "amount_eur":
+        if predicted is None or expected is None:
+            return predicted == expected
+        return abs(float(predicted) - float(expected)) < 0.01
+    return (str(predicted) if predicted is not None else None) == expected
+
+
+def run_letters(args: argparse.Namespace) -> dict:
+    """Letter path: mask -> extract fields -> agent explanation.
+
+    field_acc  share of correct fields (sender, letter_date, deadline, amount_eur)
+    pii_leaks  number of letters where any of its fake personal data appeared in ANY prompt
+               sent to the LLM (extraction, planner, answer). Must be 0.
+    """
+    from app.agent.graph import run_agent
+    from app.letter.extract import extract_fields
+    from app.letter.mask import mask
+
+    letters = load_jsonl(EVAL_DIR / "letters.jsonl")[: args.limit or None]
+    rows, latencies = [], []
+    with Session(get_engine()) as session:
+        for letter in letters:
+            start = time.perf_counter()
+            with record_prompts() as prompts:
+                masked = mask(letter["text"])
+                fields = with_retry(lambda t=masked.text: extract_fields(t, allow_fallback=False))
+                time.sleep(args.sleep)
+                state = run_agent(session, fields=fields, lang="en")
+            latencies.append(time.perf_counter() - start)
+            sent = "\n".join(prompts)
+            leaked = [p for p in letter["pii"] if p in sent]
+            predicted = fields.model_dump(mode="json")
+            correct = {
+                f: field_correct(f, predicted[f], letter["fields"][f]) for f in LETTER_FIELDS
+            }
+            rows.append(
+                {
+                    "id": letter["id"],
+                    "kind": "letter",
+                    "fields": predicted,
+                    "correct": correct,
+                    "leaked": leaked,
+                    "refused": state["response"].refused,
+                    "tool_log": state.get("tool_log"),
+                    "answer": state["response"].answer,
+                }
+            )
+            print(
+                f"  {letter['id']} correct={sum(correct.values())}/{len(correct)} "
+                f"leaks={len(leaked)} tools={state.get('tool_log')}"
+            )
+            time.sleep(args.sleep)
+    total = sum(len(r["correct"]) for r in rows)
+    return {
+        "date": date.today().isoformat(),
+        "mode": "letters",
+        "answers": True,
+        "query_rewrite": False,
+        "answer_model": get_settings().groq_model,
+        "n_answerable": len(rows),
+        "n_unanswerable": 0,
+        "metrics": {
+            "hit@5": None,
+            "mrr": None,
+            "correctness": None,
+            "refusal_acc": None,
+            "answered_rate": round(sum(not r["refused"] for r in rows) / len(rows), 3),
+            "field_acc": round(sum(sum(r["correct"].values()) for r in rows) / total, 3),
+            "pii_leaks": sum(bool(r["leaked"]) for r in rows),
+            "p95_latency_s": round(p95(latencies), 2),
+        },
+        "rows": rows,
+    }
+
+
+def check_baseline(result: dict, baseline_path: Path, max_drop: float) -> bool:
+    """CI quality gate: correctness on the SAME questions must not drop more than max_drop."""
+    base = {r["id"]: r for r in json.loads(baseline_path.read_text("utf-8"))["rows"]}
+    now = [r for r in result["rows"] if r["kind"] == "answerable" and "score" in r]
+    pairs = [(r["score"], base[r["id"]]["score"]) for r in now if "score" in base.get(r["id"], {})]
+    if not pairs:
+        print("No overlapping judged questions with the baseline.")
+        return False
+    current = statistics.mean(p[0] for p in pairs)
+    reference = statistics.mean(p[1] for p in pairs)
+    ok = current >= reference - max_drop
+    print(
+        f"\nBaseline check on {len(pairs)} questions: now {current:.2f}, "
+        f"baseline {reference:.2f}, allowed drop {max_drop:.2f} -> {'PASS' if ok else 'FAIL'}"
+    )
+    return ok
+
+
 def fmt(v: float | None) -> str:
     return "TBD" if v is None else f"{v:.2f}"
 
@@ -323,14 +434,24 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None, help="only the first N questions")
     parser.add_argument("--sleep", type=float, default=2.5, help="seconds between LLM calls")
     parser.add_argument("--no-save", action="store_true")
+    parser.add_argument("--letters", action="store_true", help="evaluate the letter path")
+    parser.add_argument("--baseline", type=Path, help="fail if correctness drops vs this run")
+    parser.add_argument("--max-drop", type=float, default=0.10)
     args = parser.parse_args()
-    if not args.mode and not args.rejudge:
-        parser.error("--mode is required (or use --rejudge FILE)")
+    if not (args.mode or args.rejudge or args.letters):
+        parser.error("use --mode, --rejudge FILE or --letters")
 
-    result = rejudge(args.rejudge, args) if args.rejudge else run(args)
+    if args.letters:
+        result = run_letters(args)
+    elif args.rejudge:
+        result = rejudge(args.rejudge, args)
+    else:
+        result = run(args)
     print("\n" + json.dumps(result["metrics"], indent=2))
 
-    if args.answers or args.rejudge:  # print 5 random judgments so a human can check the judge
+    if (
+        args.answers or args.rejudge
+    ) and not args.letters:  # print 5 random judgments so a human can check the judge
         judged = [r for r in result["rows"] if "score" in r and r["judge_reason"] != "refused"]
         print("\n--- 5 random judgments to check by hand ---")
         for r in random.sample(judged, min(5, len(judged))):
@@ -339,6 +460,8 @@ def main() -> None:
 
     if not args.no_save:
         print(f"\nSaved {save(result)}")
+    if args.baseline and not check_baseline(result, args.baseline, args.max_drop):
+        sys.exit(1)
 
 
 if __name__ == "__main__":
