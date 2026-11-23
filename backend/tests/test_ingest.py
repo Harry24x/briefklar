@@ -119,3 +119,17 @@ def test_glossary_popups_removed_and_inline_terms_kept() -> None:
     assert "Schließen" not in text and "baulich abgeschlossene" not in text  # pop-up removed
     assert "Menü" not in text  # navigation removed
     assert "## Meldedaten" in page.text  # in-article <header> heading kept
+
+
+def test_faq_page_with_many_blocks_keeps_every_answer() -> None:
+    blocks = "".join(
+        f"""<div class="m001"><div class="textBlock"><h2>Frage {i}?</h2>
+        <p>Antwort {i}: {" ".join(["Für jede Wohnung zahlt nur eine volljährige Person."] * 6)}</p>
+        </div></div>"""
+        for i in range(1, 6)
+    )
+    html = f"<html><body><main>{blocks}</main></body></html>"
+    page = parse_page(html, "https://rb.de/faq", seed_lang="de", topic=None)
+    assert page is not None
+    for i in range(1, 6):  # trafilatura alone would keep only one of these blocks
+        assert f"## Frage {i}?" in page.text and f"Antwort {i}:" in page.text
