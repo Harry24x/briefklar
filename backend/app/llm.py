@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 
-from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
+from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI, RateLimitError
 
 from app.config import get_settings
 
@@ -105,4 +105,51 @@ def chat_json(
         except (APIConnectionError, APITimeoutError) as exc:
             last_error = exc
             time.sleep(1.0)
+        except APIStatusError as exc:  # 400/5xx: callers must see an LLMError, not a crash
+            raise LLMError(f"{current}: HTTP {exc.status_code}: {exc.message}") from exc
     raise LLMError(f"LLM call failed after {len(attempts)} attempts: {last_error}")
+
+
+@dataclass
+class ToolCall:
+    name: str
+    args: dict
+
+
+def chat_tools(
+    messages: list[dict[str, str]],
+    tools: list[dict],
+    *,
+    model: str,
+    max_tokens: int = 300,
+) -> ToolCall | None:
+    """Native function calling: the model picks one tool (or none, which means "finish").
+
+    Used by the agent planner. No fallback model: if this fails, the agent uses its fixed
+    plan instead, so errors are simply raised as LLMError.
+    """
+    import json
+
+    if _recorded is not None:
+        _recorded.extend(m["content"] for m in messages)
+    reasoning = model.startswith(REASONING_MODELS)
+    try:
+        response = get_client().chat.completions.create(
+            model=model,
+            messages=messages,  # type: ignore[arg-type]
+            tools=tools,  # type: ignore[arg-type]
+            tool_choice="auto",
+            temperature=0.0,
+            max_tokens=max_tokens + (REASONING_TOKEN_BUDGET if reasoning else 0),
+            extra_body={"reasoning_effort": "low"} if reasoning else None,
+        )
+    except (RateLimitError, APIConnectionError, APITimeoutError, APIStatusError) as exc:
+        raise LLMError(f"{model} tool call failed: {exc}") from exc
+    calls = response.choices[0].message.tool_calls or []
+    if not calls:
+        return None
+    try:
+        args = json.loads(calls[0].function.arguments or "{}")
+    except json.JSONDecodeError as exc:
+        raise LLMError(f"{model} returned invalid tool arguments") from exc
+    return ToolCall(name=calls[0].function.name, args=args if isinstance(args, dict) else {})

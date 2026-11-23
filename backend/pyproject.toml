@@ -16,6 +16,8 @@ dependencies = [
     "pyyaml>=6.0",
     "langdetect>=1.0.9",
     "openai>=1.40",
+    "ics>=0.7,<0.8",
+    "langgraph>=0.2",
 ]
 
 [project.optional-dependencies]
@@ -42,3 +44,7 @@ select = ["E", "F", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    "ignore:Behaviour of str\\(Component\\):FutureWarning",
+    "ignore::urllib3.exceptions.DependencyWarning",
+]

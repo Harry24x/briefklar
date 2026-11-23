@@ -179,3 +179,49 @@ def test_reasoning_model_gets_low_effort_and_empty_reply_is_retried(monkeypatch)
     assert result.content == '{"ok": true}' and len(calls) == 2
     assert calls[0]["extra_body"] == {"reasoning_effort": "low"}
     assert calls[0]["max_tokens"] == 100 + llm.REASONING_TOKEN_BUDGET
+
+
+def _fake_client(create):
+    return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+
+
+def test_chat_tools_parses_native_tool_call_and_none_means_finish(monkeypatch) -> None:
+    replies = iter(
+        [
+            [
+                SimpleNamespace(
+                    function=SimpleNamespace(
+                        name="search_official_sources", arguments='{"query": "Rundfunkbeitrag"}'
+                    )
+                )
+            ],
+            None,
+        ]
+    )
+
+    def create(model, **kwargs):
+        assert kwargs["tool_choice"] == "auto" and kwargs["tools"]
+        message = SimpleNamespace(tool_calls=next(replies), content=None)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    monkeypatch.setattr(llm, "get_client", lambda: _fake_client(create))
+    tools = [{"type": "function", "function": {"name": "search_official_sources"}}]
+    call = llm.chat_tools([{"role": "user", "content": "x"}], tools, model="openai/gpt-oss-20b")
+    assert call == llm.ToolCall("search_official_sources", {"query": "Rundfunkbeitrag"})
+    assert llm.chat_tools([{"role": "user", "content": "x"}], tools, model="m") is None
+
+
+def test_http_400_becomes_llm_error_so_callers_can_fall_back(monkeypatch) -> None:
+    from openai import BadRequestError
+
+    def create(model, **kwargs):
+        response = httpx.Response(400, request=httpx.Request("POST", "https://x"))
+        raise BadRequestError(
+            "Tool choice is none, but model called a tool", response=response, body=None
+        )
+
+    monkeypatch.setattr(llm, "get_client", lambda: _fake_client(create))
+    with pytest.raises(llm.LLMError, match="400"):
+        llm.chat_json([{"role": "user", "content": "x"}])
+    with pytest.raises(llm.LLMError):
+        llm.chat_tools([{"role": "user", "content": "x"}], [], model="m")

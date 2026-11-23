@@ -33,3 +33,19 @@ class AskResponse(BaseModel):
     confidence: Literal["low", "medium", "high"]
     refused: bool
     disclaimer: str = DISCLAIMER
+
+
+class LetterRequest(BaseModel):
+    text: str = Field(min_length=20, max_length=8000)
+
+
+class LetterResponse(BaseModel):
+    fields: "LetterFields"
+    explanation: AskResponse
+    ics_available: bool
+    masked_items: dict[str, int]  # how many items of each kind were masked, e.g. {"NAME": 1}
+
+
+from app.letter.extract import LetterFields  # noqa: E402  (avoid a circular import)
+
+LetterResponse.model_rebuild()
