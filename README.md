@@ -1,9 +1,13 @@
+<p align="center"><img src="docs/logo.svg" alt="BriefKlar" width="360"></p>
+
 # BriefKlar
 
 > Explains German official letters and bureaucracy rules to international students in simple
 > English, with an official source for every answer.
 
 **Live demo:** not hosted yet. It runs locally with Docker (see Quick start); a deployment guide is in [`DEPLOY.md`](DEPLOY.md).
+
+![BriefKlar start page](docs/screenshot.png)
 
 ![Architecture](docs/architecture.png)
 
