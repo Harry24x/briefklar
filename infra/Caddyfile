@@ -1,0 +1,20 @@
+# Caddy gets and renews a Let's Encrypt certificate for API_DOMAIN automatically.
+{$API_DOMAIN} {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+	# Request bodies are small (max 8000 characters of letter text).
+	request_body {
+		max_size 64KB
+	}
+	reverse_proxy backend:8000
+	log {
+		# Access log without request bodies: no letter text is ever written to disk.
+		output stdout
+		format console
+	}
+}

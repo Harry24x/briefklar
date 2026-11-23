@@ -1,0 +1,61 @@
+# Production on one Ubuntu VM (Oracle Ampere A1 / any x86 or ARM64 host).
+# Run from the repo root:
+#   docker compose --env-file .env -f infra/docker-compose.prod.yml up -d --build
+# Only Caddy is reachable from the internet (ports 80/443); it gets HTTPS certificates
+# automatically and forwards to the backend. The database is not exposed at all.
+
+name: briefklar
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-briefklar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-briefklar}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../backend/app/sql/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-briefklar} -d ${POSTGRES_DB:-briefklar}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ../backend
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-briefklar}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-briefklar}
+      HF_HOME: /models
+    volumes:
+      - hf_cache:/models
+    expose:
+      - "8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?set API_DOMAIN in .env, e.g. briefklar.duckdns.org}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  hf_cache:
+  caddy_data:
+  caddy_config:
